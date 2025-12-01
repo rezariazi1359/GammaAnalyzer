@@ -1,0 +1,6 @@
+pydicom
+numpy
+pandas
+matplotlib
+pymedphys
+scipy
