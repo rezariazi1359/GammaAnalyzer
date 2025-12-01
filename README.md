@@ -1,37 +1,34 @@
-# GammaAnalyzer
-
-A medical physics tool for visualizing CT + RTDOSE datasets and computing 3D Gamma Index
-between two dose distributions. Designed for clinical research and QA comparison between
-OriginalCT-Plan vs. SynCT-Plan (or other dose sets).
-
----
-
-## 📂 Required Folder Structure
-
-The root folder you select in the GUI must follow this format:
-
-
-✔ Each scan subfolder must include:
-- CT Image Storage DICOM files
-- One (or more) RT Dose DICOM file (largest used automatically)
-
----
-
-## 🔍 Features
-
-- Automatic detection of patient folders + scan types
-- CT + Dose loading into memory
-- Interactive slice viewer (**CT + dose overlay**)
-- 3D Gamma Index calculation
-- Export of results:
-  - `.npy`
-  - `.csv`
-  - `.png`
-  - Summary `.txt`
-
----
-
-## 🖥 Running the App
-
-```bash
-python GammaAnalyzer.py
+"GammaAnalyzer – Usage Instructions\n"
+        "---------------------------------------------\n\n"
+        "1) Root Folder Structure\n"
+        "   • Choose a ROOT folder that contains one folder per PATIENT.\n"
+        "   • Inside each patient folder, there may be multiple subfolders\n"
+        "     (scan types / studies / plans).\n"
+        "   • The program will automatically search all subfolders for:\n"
+        "       - CT series      (DICOM with CT Image Storage UID)\n"
+        "       - RT Dose files  (DICOM with RT Dose Storage UID)\n\n"
+        "   Example:\n"
+        "     MyData/\n"
+        "       ├── P001/\n"
+        "       │     ├── OriginalCT-Plan/\n"
+        "       │     │      CT*.dcm\n"
+        "       │     │      RTDOSE*.dcm\n"
+        "       │     └── SynCT-Plan/\n"
+        "       │            CT*.dcm\n"
+        "       │            RTDOSE*.dcm\n"
+        "       ├── P002/\n"
+        "       │     ├── StudyA/\n"
+        "       │     └── StudyB/\n"
+        "       └── ...\n\n"
+        "2) Workflow\n"
+        "   • Click 'Load Patient Data' and select the ROOT folder.\n"
+        "   • Choose a patient ID from the dropdown.\n"
+        "   • Select two scan types (A = reference, B = evaluation).\n"
+        "   • Use 'View Slices' to visually verify CT + dose overlay.\n"
+        "   • Adjust gamma criteria if needed (2% / 2mm / 10% etc.).\n"
+        "   • Click 'Calculate Gamma Index' to run 3D gamma.\n\n"
+        "3) Outputs\n"
+        "   • Gamma 3D array (.npy)\n"
+        "   • Flattened gamma (.csv)\n"
+        "   • Text summary (pass rate, criteria)\n"
+        "   • Mid-slice gamma PNG image\n"
