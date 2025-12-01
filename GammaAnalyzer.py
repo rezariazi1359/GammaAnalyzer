@@ -31,9 +31,6 @@ selected_index_var = None
 selected_index_menu = None
 
 
-# In[2]:
-
-
 # Global data holders
 data_structure = {}
 dose_cache = {}  # currently unused
@@ -472,10 +469,6 @@ def finish_gamma_ui_updates():
             pass
 
 
-
-# In[3]:
-
-
 root = tk.Tk()
 root.withdraw()  # Hide until UI builds completely
 root.title("GammaAnalyzer – Gamma Index GUI")
@@ -626,10 +619,3 @@ root.protocol("WM_DELETE_WINDOW", on_close)
 if __name__ == "__main__":
     root.deiconify()  # show the window now that it's built
     root.mainloop()
-
-
-# In[4]:
-
-
-get_ipython().system('jupyter nbconvert --to script "GammaAnalyzer.ipynb"')
-
