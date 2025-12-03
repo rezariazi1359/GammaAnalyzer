@@ -1,34 +1,44 @@
-"GammaAnalyzer – Usage Instructions\n"
-        "---------------------------------------------\n\n"
-        "1) Root Folder Structure\n"
-        "   • Choose a ROOT folder that contains one folder per PATIENT.\n"
-        "   • Inside each patient folder, there may be multiple subfolders\n"
-        "     (scan types / studies / plans).\n"
-        "   • The program will automatically search all subfolders for:\n"
-        "       - CT series      (DICOM with CT Image Storage UID)\n"
-        "       - RT Dose files  (DICOM with RT Dose Storage UID)\n\n"
-        "   Example:\n"
-        "     MyData/\n"
-        "       ├── P001/\n"
-        "       │     ├── OriginalCT-Plan/\n"
-        "       │     │      CT*.dcm\n"
-        "       │     │      RTDOSE*.dcm\n"
-        "       │     └── SynCT-Plan/\n"
-        "       │            CT*.dcm\n"
-        "       │            RTDOSE*.dcm\n"
-        "       ├── P002/\n"
-        "       │     ├── StudyA/\n"
-        "       │     └── StudyB/\n"
-        "       └── ...\n\n"
-        "2) Workflow\n"
-        "   • Click 'Load Patient Data' and select the ROOT folder.\n"
-        "   • Choose a patient ID from the dropdown.\n"
-        "   • Select two scan types (A = reference, B = evaluation).\n"
-        "   • Use 'View Slices' to visually verify CT + dose overlay.\n"
-        "   • Adjust gamma criteria if needed (2% / 2mm / 10% etc.).\n"
-        "   • Click 'Calculate Gamma Index' to run 3D gamma.\n\n"
-        "3) Outputs\n"
-        "   • Gamma 3D array (.npy)\n"
-        "   • Flattened gamma (.csv)\n"
-        "   • Text summary (pass rate, criteria)\n"
-        "   • Mid-slice gamma PNG image\n"
+GammaAnalyzer – Usage Instructions
+---------------------------------------------
+
+1) Root Folder Structure
+ • Choose a ROOT folder that contains one folder per PATIENT.
+ • Inside each patient folder, create numbered SCAN subfolders (Scan1, Scan2, … ScanN).
+ • Each scan folder should contain all DICOM files directly in its root:
+   - CT series (DICOM with CT Image Storage UID)
+   - RT Dose file (DICOM with RT Dose Storage UID)
+
+ Example:
+ MyData/
+ ├── P001/
+ │   ├── Scan1/
+ │   │   CT*.dcm
+ │   │   RTDOSE*.dcm
+ │   ├── Scan2/
+ │   │   CT*.dcm
+ │   │   RTDOSE*.dcm
+ │   └── Scan3/
+ │       CT*.dcm
+ │       RTDOSE*.dcm
+ ├── P002/
+ │   ├── Scan1/
+ │   │   CT*.dcm
+ │   │   RTDOSE*.dcm
+ │   └── Scan2/
+ │       CT*.dcm
+ │       RTDOSE*.dcm
+ └── ...
+
+2) Workflow
+ • Launch GammaAnalyzer.exe.
+ • Click 'Load Patient Data' and select the ROOT folder.
+ • Choose a patient ID from the dropdown.
+ • Select two scan types (A = reference, B = evaluation).
+ • Use 'View Slices' to visually verify CT + dose overlay.
+ • Adjust gamma criteria if needed (e.g. 2% / 2 mm / 10% threshold).
+ • Click 'Calculate Gamma Index' to run the 3D gamma analysis.
+
+3) Outputs
+ • Flattened gamma values (.csv)
+ • Text summary report (.txt) with pass rate and criteria
+ • Debug log file (.log) showing processing steps
