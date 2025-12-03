@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+import os, sys, pydicom, pickle, time, logging, pymedphys, threading
 
-
-import os
 import tkinter as tk
 import tkinter.ttk as ttk
 
@@ -12,20 +10,10 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import pydicom
-import pymedphys
-from scipy.interpolate import RegularGridInterpolator
-#from skimage import measure
-from scipy.spatial import cKDTree
 from mpl_toolkits.mplot3d import Axes3D
-import pickle
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from tkinter import simpledialog
-import pymedphys
-import threading
-import time
-
 # Global GUI variables
 selected_index_var = None
 selected_index_menu = None
@@ -36,15 +24,188 @@ data_structure = {}
 dose_cache = {}  # currently unused
 
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+
+
+
+def calculate_gamma_index(pid, scanA, scanB, gamma_inputs):
+    logger.info("Gamma calculation started")
+    entryA = data_structure[pid][scanA]
+    entryB = data_structure[pid][scanB]
+
+    doseA, xA, yA, zA = entryA["dose"]
+    doseB, xB, yB, zB = entryB["dose"]
+
+    # --- Sanitize arrays before gamma ---
+    def ensure_numpy(arr, name="array"):
+        arr_np = np.ascontiguousarray(np.asarray(arr, dtype=np.float64))
+        logger.debug(
+            f"{name}: shape={arr_np.shape}, dtype={arr_np.dtype}, "
+            f"contiguous={arr_np.flags['C_CONTIGUOUS']}"
+        )
+        return arr_np
+
+    doseA = ensure_numpy(doseA, "doseA")
+    doseB = ensure_numpy(doseB, "doseB")
+    xA, yA, zA = (ensure_numpy(xA, "xA"),
+                  ensure_numpy(yA, "yA"),
+                  ensure_numpy(zA, "zA"))
+    xB, yB, zB = (ensure_numpy(xB, "xB"),
+                  ensure_numpy(yB, "yB"),
+                  ensure_numpy(zB, "zB"))
+
+    # Geometry validation
+    dx = np.max(np.abs(xA - xB))
+    dy = np.max(np.abs(yA - yB))
+    dz = np.max(np.abs(zA - zB))
+
+    logger.debug(f"Geometry deltas: dX={dx:.6f}, dY={dy:.6f}, dZ={dz:.6f}")
+
+    if dx > 1e-6 or dy > 1e-6 or dz > 1e-6:
+        return {
+            "error": f"Geometry Mismatch:\n"
+                     f"dX: {dx:.3f} mm | dY: {dy:.3f} mm | dZ: {dz:.3f} mm"
+        }
+
+    # Gamma Criteria from UI
+    dose_percent  = gamma_inputs["dose_percent"]
+    dta_mm        = gamma_inputs["dta_mm"]
+    dose_threshold= gamma_inputs["dose_threshold"]
+    local_flag    = gamma_inputs["local_flag"]
+
+    gamma_options = {
+        "dose_percent_threshold": dose_percent,
+        "distance_mm_threshold":  dta_mm,
+        "lower_percent_dose_cutoff": dose_threshold,
+        "local_gamma": local_flag,
+        "max_gamma": 2.0,
+        "interp_fraction": 10,
+    }
+
+    for name, arr in [("xA", xA), ("yA", yA), ("zA", zA), ("doseA", doseA),
+                  ("xB", xB), ("yB", yB), ("zB", zB), ("doseB", doseB)]:
+        logger.debug(f"{name}: type={type(arr)}, dtype={arr.dtype}, contiguous={arr.flags['C_CONTIGUOUS']}")
+
+    
+    logger.debug(f"xA range: {xA[0]} → {xA[-1]}, spacing={np.mean(np.diff(xA))}")
+    logger.debug(f"xB range: {xB[0]} → {xB[-1]}, spacing={np.mean(np.diff(xB))}")
+    logger.debug(f"yA range: {yA[0]} → {yA[-1]}, spacing={np.mean(np.diff(yA))}")
+    logger.debug(f"yB range: {yB[0]} → {yB[-1]}, spacing={np.mean(np.diff(yB))}")
+    logger.debug(f"zA range: {zA[0]} → {zA[-1]}, spacing={np.mean(np.diff(zA))}")
+    logger.debug(f"zB range: {zB[0]} → {zB[-1]}, spacing={np.mean(np.diff(zB))}")
+    
+    logger.debug(f"doseA max={np.max(doseA)}, min={np.min(doseA)}")
+    logger.debug(f"doseB max={np.max(doseB)}, min={np.min(doseB)}")
+    logger.debug(f"Expected dose array shape: ({len(xA)}, {len(yA)}, {len(zA)})")
+    logger.debug(f"Actual doseA shape: {doseA.shape}")
+    logger.debug(f"Actual doseB shape: {doseB.shape}")
+    logger.debug(f"Types: xA={type(xA)}, yA={type(yA)}, zA={type(zA)}, doseA={type(doseA)}")
+    
+    logger.debug(f"Gamma options: {gamma_options}")
+    
+    logger.info("Geometry check passed")
+    try:
+        gamma = pymedphys.gamma(
+            (xA.astype(np.float64), yA.astype(np.float64), zA.astype(np.float64)), doseA.astype(np.float64),
+            (xB.astype(np.float64), yB.astype(np.float64), zB.astype(np.float64)), doseB.astype(np.float64),
+            **gamma_options
+        )
+        logger.debug(f"Gamma result stats: min={np.nanmin(gamma)}, max={np.nanmax(gamma)}")
+    except Exception as e:
+        logger.error(f"Gamma calculation failed: {e}")
+        return {"error": str(e)}
+        
+    logger.info("Gamma calculation completed successfully")
+
+    valid_voxels = ~np.isnan(gamma)
+    pass_mask = (gamma[valid_voxels] <= 1)
+    pass_rate = 100 * np.sum(pass_mask) / np.sum(valid_voxels)
+
+    logger.info(f"Gamma pass rate: {pass_rate:.2f}% "
+                f"(valid voxels={np.sum(valid_voxels)})")
+
+    # File save base name
+    saveBase = f"gamma_{pid}_{scanA}_vs_{scanB}_{int(dose_percent*100)}pc_{int(dta_mm)}mm"
+    paths = {
+        "npy": os.path.join(root_path, saveBase + ".npy"),
+        "csv": os.path.join(root_path, saveBase + ".csv"),
+        "txt": os.path.join(root_path, saveBase + "_summary.txt"),
+        "png": os.path.join(root_path, saveBase + ".png"),
+    }
+
+    # Save gamma map
+    np.save(paths["npy"], gamma)
+    np.savetxt(paths["csv"],
+               gamma.reshape(-1, gamma.shape[2]), delimiter=",")
+
+    # Summary text file
+    with open(paths["txt"], "w") as f:
+        f.write(f"Gamma Report\nPID: {pid}\n{scanA} vs {scanB}\n\n")
+        f.write(f"Criteria: {dose_percent*100:.1f}% / {dta_mm:.1f} mm\n")
+        f.write(f"Threshold: {dose_threshold*100:.1f}%\n")
+        f.write(f"Local Gamma: {local_flag}\n\n")
+        f.write(f"Pass Rate: {pass_rate:.2f}%\n")
+        f.write(f"Valid Voxels: {np.sum(valid_voxels)}\n")
+
+    # Save slice image
+    mid_idx = gamma.shape[2] // 2
+    fig = plt.figure(figsize=(7,7))
+    plt.imshow(gamma[:,:,mid_idx], cmap="coolwarm", vmin=0, vmax=2)
+    plt.colorbar(label="Gamma")
+    plt.title(f"Mid Slice Gamma — {pid}\n{scanA} vs {scanB}")
+    plt.savefig(paths["png"])
+    plt.close(fig)
+
+    
+    # Debug BEFORE shutdown and return
+    logger.debug(f"Gamma calculation finished, result shape={gamma.shape}")
+
+    # --- Cleanup logging handlers to release file lock ---
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)
+    logging.shutdown()   # <-- ensures Windows releases the file
+    
+    return {
+        "pass_rate": pass_rate,
+        "paths": paths
+    }
+
+
+
 def load_patient_data():
     global root_path, data_structure, selected_index_var
-
-    data_structure = {}
-
+    
     root_path = filedialog.askdirectory(title="Select Patient Root Folder")
     if not root_path:
         messagebox.showwarning("No Folder", "Please select a valid folder.")
         return
+    
+    # 👉 Initialize logger here, pointing to root_path
+    log_file = os.path.join(root_path, "gamma_debug.log")
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+
+    logger.info(f"Logger initialized for patient root: {root_path}")    
+    logger.info("Starting patient data load...")
+
+    # existing code...
+    if not root_path:
+        logger.warning("No folder selected for patient data")
+        return
+
+    # after successful load
+    logger.info(f"Patient data loaded successfully from {root_path}")
+
+    data_structure = {}
+
+    
 
     patient_ids = sorted(
         d for d in os.listdir(root_path)
@@ -114,7 +275,10 @@ def load_patient_data():
     
 
 def load_dose_data(dose_file):
+    logger.info(f"Loading RTDOSE file: {dose_file}")
+
     """Load RTDOSE DICOM file into 3D dose + coordinate arrays"""
+        
     ds = pydicom.dcmread(dose_file)
 
     # Extract dose matrix and scaling
@@ -139,6 +303,8 @@ def load_dose_data(dose_file):
         image_pos[1] + pixel_spacing[0]*(dose_3d.shape[1]-1),
         dose_3d.shape[1]
     )
+    
+    logger.info("RTDOSE file loaded and dose matrix extracted")
 
     return dose_3d, x_coords, y_coords, z_positions
 
@@ -302,90 +468,6 @@ def view_slices():
         root.focus_force()
         root.after(10, lambda: root.attributes('-topmost', False))
 
-
-def calculate_gamma_index(pid, scanA, scanB, gamma_inputs):
-    entryA = data_structure[pid][scanA]
-    entryB = data_structure[pid][scanB]
-
-    doseA, xA, yA, zA = entryA["dose"]
-    doseB, xB, yB, zB = entryB["dose"]
-
-    # Geometry validation
-    dx = np.max(np.abs(xA - xB))
-    dy = np.max(np.abs(yA - yB))
-    dz = np.max(np.abs(zA - zB))
-
-    if dx > 1e-6 or dy > 1e-6 or dz > 1e-6:
-        return {
-            "error": f"Geometry Mismatch:\nΔX: {dx:.3f} mm | ΔY: {dy:.3f} mm | ΔZ: {dz:.3f} mm"
-        }
-
-    # Gamma Criteria from UI (passed in as dictionary)
-    dose_percent  = gamma_inputs["dose_percent"]
-    dta_mm        = gamma_inputs["dta_mm"]
-    dose_threshold= gamma_inputs["dose_threshold"]
-    local_flag    = gamma_inputs["local_flag"]
-
-    axes_ref = (xA, yA, zA)
-    axes_eval = (xB, yB, zB)
-
-    gamma_options = {
-        "dose_percent_threshold": dose_percent,
-        "distance_mm_threshold":  dta_mm,
-        "lower_percent_dose_cutoff": dose_threshold,
-        "local_gamma": local_flag,
-        "max_gamma": 2.0,
-        "interp_fraction": 10,
-    }
-
-    gamma = pymedphys.gamma(
-        axes_ref, doseA,
-        axes_eval, doseB,
-        **gamma_options
-    )
-
-    valid_voxels = ~np.isnan(gamma)
-    pass_mask = (gamma[valid_voxels] <= 1)
-    pass_rate = 100 * np.sum(pass_mask) / np.sum(valid_voxels)
-
-    # File save base name
-    saveBase = f"gamma_{pid}_{scanA}_vs_{scanB}_{int(dose_percent*100)}pc_{int(dta_mm)}mm"
-    paths = {
-        "npy": os.path.join(root_path, saveBase + ".npy"),
-        "csv": os.path.join(root_path, saveBase + ".csv"),
-        "txt": os.path.join(root_path, saveBase + "_summary.txt"),
-        "png": os.path.join(root_path, saveBase + ".png"),
-    }
-
-    # Save gamma map
-    np.save(paths["npy"], gamma)
-    np.savetxt(paths["csv"],
-               gamma.reshape(-1, gamma.shape[2]), delimiter=",")
-
-    # Summary text file
-    with open(paths["txt"], "w") as f:
-        f.write(f"Gamma Report\nPID: {pid}\n{scanA} vs {scanB}\n\n")
-        f.write(f"Criteria: {dose_percent*100:.1f}% / {dta_mm:.1f} mm\n")
-        f.write(f"Threshold: {dose_threshold*100:.1f}%\n")
-        f.write(f"Local Gamma: {local_flag}\n\n")
-        f.write(f"Pass Rate: {pass_rate:.2f}%\n")
-        f.write(f"Valid Voxels: {np.sum(valid_voxels)}\n")
-
-    # Save slice image
-    mid_idx = gamma.shape[2] // 2
-    fig = plt.figure(figsize=(7,7))
-    plt.imshow(gamma[:,:,mid_idx], cmap="coolwarm", vmin=0, vmax=2)
-    plt.colorbar(label="Gamma")
-    plt.title(f"Mid Slice Gamma — {pid}\n{scanA} vs {scanB}")
-    plt.savefig(paths["png"])
-    plt.close(fig)
-
-    return {
-        "pass_rate": pass_rate,
-        "paths": paths
-    }
-
-
 def start_gamma_thread():
     pid = selected_index_var.get()
     scanA = scan_type_A_var.get()
@@ -448,7 +530,7 @@ def calculate_gamma_index_threaded(pid, scanA, scanB, gamma_inputs):
         root.after(0, handle_result)
 
     except Exception as e:
-        root.after(0, lambda: messagebox.showerror("Gamma Error", str(e)))
+        root.after(0, lambda err=e: messagebox.showerror("Gamma Error", str(err)))
     finally:
         root.after(0, finish_gamma_ui_updates)
 
@@ -467,7 +549,6 @@ def finish_gamma_ui_updates():
         except tk.TclError:
             # In case Tk is already destroyed or not in a GUI context
             pass
-
 
 root = tk.Tk()
 root.withdraw()  # Hide until UI builds completely
